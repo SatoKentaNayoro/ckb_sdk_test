@@ -2,7 +2,7 @@ use std::env;
 use std::str::FromStr;
 use ckb_hash::blake2b_256;
 use ckb_sdk::constants::SIGHASH_TYPE_HASH;
-use ckb_sdk::SECP256K1;
+use ckb_sdk::{CkbRpcClient, SECP256K1};
 use ckb_sdk::traits::{CellCollector, CellQueryOptions, LiveCell, ValueRangeOption};
 use ckb_types::bytes::Bytes;
 use ckb_types::core::{ScriptHashType, TransactionBuilder};
@@ -179,7 +179,15 @@ fn test_xudt() {
         .cell_dep(xudttype_dep)
         .witnesses(witnesses.pack())
         .build();
-    println!("tx: {}", tx)
+    let json_tx = ckb_jsonrpc_types::TransactionView::from(tx);
+    println!("tx: {}", serde_json::to_string(&json_tx).unwrap());
+    let outputs_validator = Some(ckb_jsonrpc_types::OutputsValidator::Passthrough);
+
+    let ckb_client = CkbRpcClient::new(&ckb_rpc);
+    let tx_hash = ckb_client
+        .send_transaction(json_tx.inner, outputs_validator.clone())
+        .expect("send transaction");
+    println!(">>> tx {} sent! <<<", tx_hash);
 }
 
 fn collect_inputs(
