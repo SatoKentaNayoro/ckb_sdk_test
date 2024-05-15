@@ -2,7 +2,7 @@ use std::env;
 use std::str::FromStr;
 use ckb_hash::blake2b_256;
 use ckb_sdk::constants::SIGHASH_TYPE_HASH;
-use ckb_sdk::{CkbRpcClient, SECP256K1};
+use ckb_sdk::{CkbRpcClient, NetworkInfo, SECP256K1};
 use ckb_sdk::traits::{CellCollector, CellQueryOptions, LiveCell, ValueRangeOption};
 use ckb_types::bytes::Bytes;
 use ckb_types::core::{ScriptHashType, TransactionBuilder};
@@ -47,14 +47,15 @@ impl RgbppTokenInfo {
 #[test]
 fn test_xudt() {
     dotenv().ok().unwrap();
+    let network_info = NetworkInfo::testnet();
+
     let xudt = RgbppTokenInfo {
         decimal: 8,
         name: "Test CKB Bool Token".to_string(),
         symbol: "TCBT".to_string(),
     };
 
-    let ckb_rpc = env::var("CKB_RPC").unwrap();
-    let mut cell_collector = get_cell_collector(&ckb_rpc);
+    let mut cell_collector = get_cell_collector(&network_info.url);
 
     let sender_key = secp256k1::SecretKey::from_str(env::var("SenderKey").unwrap().as_str()).unwrap();
     let sender = {
@@ -183,7 +184,7 @@ fn test_xudt() {
     println!("tx: {}", serde_json::to_string(&json_tx).unwrap());
     let outputs_validator = Some(ckb_jsonrpc_types::OutputsValidator::Passthrough);
 
-    let ckb_client = CkbRpcClient::new(&ckb_rpc);
+    let ckb_client = CkbRpcClient::new(&network_info.url);
     let tx_hash = ckb_client
         .send_transaction(json_tx.inner, outputs_validator.clone())
         .expect("send transaction");
