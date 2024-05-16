@@ -4,12 +4,17 @@ use ckb_hash::blake2b_256;
 use ckb_sdk::constants::SIGHASH_TYPE_HASH;
 use ckb_sdk::{CkbRpcClient, NetworkInfo, SECP256K1};
 use ckb_sdk::traits::{CellCollector, CellQueryOptions, LiveCell, ValueRangeOption};
+use ckb_sdk::transaction::builder::CkbTransactionBuilder;
+use ckb_sdk::transaction::input::TransactionInput;
+use ckb_sdk::transaction::signer::{SignContexts, TransactionSigner};
+use ckb_sdk::transaction::TransactionBuilderConfiguration;
 use ckb_types::bytes::Bytes;
 use ckb_types::core::{Capacity, DepType, FeeRate, ScriptHashType, TransactionBuilder};
-use ckb_types::h256;
+use ckb_types::{h256, packed};
 use ckb_types::packed::{CellbaseWitnessBuilder, CellDep, CellInput, CellOutput, OutPoint, Script, Uint64};
 use ckb_types::prelude::{Builder, Entity, Pack, Unpack};
 use dotenv::dotenv;
+use xudt_manager::XudtTransactionBuilder;
 use ckb_test::get_cell_collector;
 
 
@@ -96,43 +101,37 @@ fn test_xudt() {
     println!("out0 capacity {}", output0_capacity);
     println!("out1 capacity {}", output1_capacity);
 
-    let query = {
+    let ckb_query = {
         let mut query = CellQueryOptions::new_lock(sender.clone());
         query.secondary_script_len_range = Some(ValueRangeOption::new_exact(0));
         query.data_len_range = Some(ValueRangeOption::new_exact(0));
         query.min_total_capacity = output0_capacity + output1_capacity + 2000_0000;
         query
     };
-    let mut empty_cells = cell_collector.collect_live_cells(&query, false).unwrap().0;
-    println!("empty_cells_before_check: {:?}", empty_cells);
-    empty_cells.retain(|cell|cell.output.type_().is_none());
-    println!("empty_cells: {:?}", empty_cells);
-    assert!(!empty_cells.is_empty());
+    let mut ckb_cells = cell_collector.collect_live_cells(&ckb_query, false).unwrap().0;
+    assert!(!ckb_cells.is_empty());
+    ckb_cells.retain(|cell|cell.output.type_().is_none());
+    println!("empty_cells: {:?}", ckb_cells);
 
     let (inputs, sum_inputs_capacity) = collect_inputs(
-        empty_cells,
+        ckb_cells.clone(),
         output0_capacity + output1_capacity,
         2000_0000,
     );
 
     let change_capacity = sum_inputs_capacity - output0_capacity - output1_capacity;
 
-    let mut outputs = vec![
-        CellOutput::new_builder()
-            .lock(sender.clone())
-            .type_(Some(xudt_type).pack())
-            .capacity(output0_capacity.pack())
-            .build(),
-        CellOutput::new_builder()
-            .lock(sender.clone())
-            .type_(Some(unique_type_script).pack())
-            .capacity(output1_capacity.pack())
-            .build(),
-        CellOutput::new_builder()
-            .lock(sender.clone())
-            .capacity(change_capacity.pack())
-            .build()
-    ];
+    // let mut outputs = vec![
+    //     CellOutput::new_builder()
+    //         .lock(sender.clone())
+    //         .type_(Some(xudt_type).pack())
+    //         .capacity(output0_capacity.pack())
+    //         .build(),
+    //     CellOutput::new_builder()
+    //         .lock(sender.clone())
+    //         .capacity(change_capacity.pack())
+    //         .build()
+    // ];
 
     let base_witness = CellbaseWitnessBuilder::default().build();
 
@@ -176,54 +175,61 @@ fn test_xudt() {
             .build()
         ).build();
 
+    let configuration = TransactionBuilderConfiguration::new_with_network(network_info.clone()).unwrap();
 
-    let tx_before = TransactionBuilder::default()
-        .inputs(inputs.clone())
-        .outputs(outputs.clone())
-        .outputs_data(output_datas.pack())
-        .cell_dep(secp256k1cell_dep.clone())
-        .cell_dep(unique_type_dep.clone())
-        .cell_dep(xudttype_dep.clone())
-        .witnesses(witnesses.pack())
-        .build();
-
-    let ckb_client = CkbRpcClient::new(&network_info.url);
-
-    let f = ckb_client.get_fee_rate_statics(None).unwrap().unwrap();
-
-    let tx_size = tx_before.pack().as_bytes().len() + 65;
-    let tx_capacity = tx_size as u64 * f.mean.value();
-    println!("tx_capacity {tx_capacity}");
-
-    let change_capacity = change_capacity - tx_capacity;
-
-    println!("change_capacity {change_capacity}");
-
-    let _ = outputs.pop();
-    outputs.push(
-        CellOutput::new_builder()
-            .lock(sender.clone())
-            .capacity(change_capacity.pack())
-            .build()
+    let mut builder = XudtTransactionBuilder::new(
+        sender.clone(),
+        sender.clone(),
+        configuration,
+        xudt.encode_rgbpp_token_info().to_vec(),
     );
 
-    let tx = TransactionBuilder::default()
-        .inputs(inputs)
-        .outputs(outputs)
-        .outputs_data(output_datas.pack())
-        .cell_dep(secp256k1cell_dep)
-        .cell_dep(unique_type_dep)
-        .cell_dep(xudttype_dep)
-        .witnesses(witnesses.pack())
-        .build();
+    builder.add_input(
+        TransactionInput{
+            live_cell: ckb_cells[0].clone(),
+            since: 0
+        },
+        0
+    );
 
-    let json_tx = ckb_jsonrpc_types::TransactionView::from(tx);
-    println!("tx: {}", serde_json::to_string(&json_tx).unwrap());
-    let outputs_validator = Some(ckb_jsonrpc_types::OutputsValidator::Passthrough);
+    builder.add_output_and_data(
+        CellOutput::new_builder()
+                .lock(sender.clone())
+                .type_(Some(xudt_type).pack())
+                .capacity(output0_capacity.pack())
+                .build(),
+        output_datas[0].pack()
+    );
+    builder.add_output_and_data(
+        CellOutput::new_builder()
+            .lock(sender.clone())
+            .type_(Some(unique_type_script).pack())
+            .capacity(output1_capacity.pack())
+            .build(),
+        output_datas[1].pack()
+    );
 
-    let tx_hash = ckb_client
-        .send_transaction(json_tx.inner, outputs_validator.clone())
+    builder.add_cell_deps(vec![secp256k1cell_dep]);
+    builder.add_cell_deps(vec![unique_type_dep]);
+
+
+    let mut tx_with_groups = builder.build(&Default::default()).unwrap();
+    let json_tx = ckb_jsonrpc_types::TransactionView::from(tx_with_groups.get_tx_view().clone());
+    println!("tx: {}", serde_json::to_string_pretty(&json_tx).unwrap());
+
+    let private_keys = vec![sender_key];
+    TransactionSigner::new(&network_info).sign_transaction(
+        &mut tx_with_groups,
+        &SignContexts::new_sighash(private_keys),
+    ).unwrap();
+
+    let json_tx = ckb_jsonrpc_types::TransactionView::from(tx_with_groups.get_tx_view().clone());
+    println!("tx: {}", serde_json::to_string_pretty(&json_tx).unwrap());
+
+    let tx_hash = CkbRpcClient::new(network_info.url.as_str())
+        .send_transaction(json_tx.inner, None)
         .expect("send transaction");
+
     println!(">>> tx {} sent! <<<", tx_hash);
 }
 
