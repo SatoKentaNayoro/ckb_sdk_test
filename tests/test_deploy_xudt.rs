@@ -18,6 +18,7 @@ use xudt_manager::XudtTransactionBuilder;
 use ckb_test::get_cell_collector;
 
 
+#[derive(Clone)]
 struct RgbppTokenInfo {
     decimal: u8,
     name: String,
@@ -85,9 +86,9 @@ fn test_xudt() {
     ckb_cells.retain(|cell|cell.output.type_().is_none());
     println!("empty_cells: {:?}", ckb_cells);
 
-    let sender_lock_capacity = sender.occupied_capacity().unwrap().as_u64();
+    let sender_lock_capacity = calculate_udt_cell_capacity(sender.clone()) as u64 * 10000_0000;
     println!("xudt_capacity {sender_lock_capacity}");
-    let xudt_info_capacity = Capacity::bytes(xudt.encode_rgbpp_token_info().len()).unwrap().as_u64();
+    let xudt_info_capacity = calculate_xudt_token_info_cell_capacity(xudt.clone(),sender.clone()) as u64 * 10000_00000;
     println!("xudt_info_capacity {xudt_info_capacity}");
     let xudt_type = Script::new_builder()
         .code_hash(h256!("0x25c29dc317811a6f6f3985a7a9ebc4838bd388d19d0feeecf0bcd60f6c0975bb").pack())
@@ -114,11 +115,6 @@ fn test_xudt() {
         xudt.encode_rgbpp_token_info(),
         Bytes::default()
     ];
-
-    let output0_capacity = sender_lock_capacity + xudt_type_capacity + Capacity::bytes(8).unwrap().as_u64() + Capacity::bytes(output_datas[0].len()).unwrap().as_u64();
-    let output1_capacity = sender_lock_capacity + unique_type_capacity + Capacity::bytes(8).unwrap().as_u64() + Capacity::bytes(output_datas[1].len()).unwrap().as_u64();
-    println!("out0 capacity {}", output0_capacity);
-    println!("out1 capacity {}", output1_capacity);
 
     let secp256k1_dep = CellDep::new_builder()
         .out_point(OutPoint::new_builder()
@@ -173,7 +169,7 @@ fn test_xudt() {
         CellOutput::new_builder()
                 .lock(sender.clone())
                 .type_(Some(xudt_type).pack())
-                .capacity(output0_capacity.pack())
+                .capacity(sender_lock_capacity.pack())
                 .build(),
         output_datas[0].pack()
     );
@@ -182,7 +178,7 @@ fn test_xudt() {
         CellOutput::new_builder()
             .lock(sender.clone())
             .type_(Some(unique_type_script).pack())
-            .capacity(output1_capacity.pack())
+            .capacity(xudt_info_capacity.pack())
             .build(),
         output_datas[1].pack()
     );
@@ -263,4 +259,18 @@ fn generate_unique_type_args(first_input: CellInput, first_output_index: u64) ->
     let mut args =  [0u8; 40];
     hasher.finalize(&mut args);
     args.pack()
+}
+
+fn calculate_udt_cell_capacity(lock: Script) -> usize {
+    let args_size = lock.args().len();
+    let type_args = 32;
+    let cell_size = 33 + args_size + 33 + type_args + 8 + 16;
+    cell_size + 1
+}
+
+fn calculate_xudt_token_info_cell_capacity(token_info: RgbppTokenInfo, lock:  Script) -> usize {
+    let lock_size = lock.args().len();
+    let cell_data_size = token_info.encode_rgbpp_token_info().len();
+    let unique_type_size = 32 + 1 + 20;
+    lock_size + unique_type_size + 8 + cell_data_size
 }
