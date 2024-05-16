@@ -5,7 +5,7 @@ use ckb_sdk::constants::SIGHASH_TYPE_HASH;
 use ckb_sdk::{CkbRpcClient, NetworkInfo, SECP256K1};
 use ckb_sdk::traits::{CellCollector, CellQueryOptions, LiveCell, ValueRangeOption};
 use ckb_types::bytes::Bytes;
-use ckb_types::core::{ScriptHashType, TransactionBuilder};
+use ckb_types::core::{FeeRate, ScriptHashType, TransactionBuilder};
 use ckb_types::h256;
 use ckb_types::packed::{CellbaseWitnessBuilder, CellDep, CellInput, CellOutput, OutPoint, Script, Uint64};
 use ckb_types::prelude::{Builder, Entity, Pack, Unpack};
@@ -99,8 +99,8 @@ fn test_xudt() {
 
     let (inputs, sum_inputs_capacity) = collect_inputs(
         empty_cells,
-        xudt_capacity.clone() + xudt_info_capacity,
-        1000,
+        xudt_capacity + xudt_info_capacity,
+        2000_0000,
     );
 
     let change_capacity = sum_inputs_capacity - xudt_capacity.clone() - xudt_info_capacity;
@@ -182,8 +182,12 @@ fn test_xudt() {
         .witnesses(witnesses.pack())
         .build();
 
-    let tx_size = tx_before.pack().as_bytes().len();
-    let change_capacity = change_capacity - (tx_size + 65) as u64;
+    let tx_size = tx_before.pack().as_bytes().len() + 65;
+    let rate = FeeRate::from_u64(1100);
+    let tx_capacity = rate.fee(tx_size as u64).as_u64();
+    println!("tx_capacity {tx_capacity}");
+
+    let change_capacity = change_capacity - tx_capacity;
 
     println!("change_capacity {change_capacity}");
 
