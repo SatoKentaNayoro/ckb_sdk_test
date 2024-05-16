@@ -158,7 +158,7 @@ fn test_xudt() {
         sender.clone(),
         sender.clone(),
         configuration,
-        xudt.encode_rgbpp_token_info().to_vec(),
+        vec![],
     );
 
     builder.add_input(
