@@ -5,7 +5,7 @@ use ckb_sdk::constants::SIGHASH_TYPE_HASH;
 use ckb_sdk::{CkbRpcClient, NetworkInfo, SECP256K1};
 use ckb_sdk::traits::{CellCollector, CellQueryOptions, LiveCell, ValueRangeOption};
 use ckb_types::bytes::Bytes;
-use ckb_types::core::{Capacity, FeeRate, ScriptHashType, TransactionBuilder};
+use ckb_types::core::{Capacity, DepType, FeeRate, ScriptHashType, TransactionBuilder};
 use ckb_types::h256;
 use ckb_types::packed::{CellbaseWitnessBuilder, CellDep, CellInput, CellOutput, OutPoint, Script, Uint64};
 use ckb_types::prelude::{Builder, Entity, Pack, Unpack};
@@ -152,7 +152,9 @@ fn test_xudt() {
             )
             .index(0u32.pack())
             .build()
-        ).build();
+        )
+        .dep_type(DepType::DepGroup.into())
+        .build();
 
     let unique_type_dep = CellDep::new_builder()
         .out_point(OutPoint::new_builder()
