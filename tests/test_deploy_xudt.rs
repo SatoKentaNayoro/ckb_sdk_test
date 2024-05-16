@@ -190,7 +190,6 @@ fn test_xudt() {
     builder.add_output_and_data(
         CellOutput::new_builder()
             .lock(sender.clone())
-            // .capacity(change_capacity.pack())
             .build(),
         PackBytes::default()
     );
