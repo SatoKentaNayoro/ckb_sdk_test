@@ -2612,7 +2612,6 @@ dependencies = [
 [[package]]
 name = "xudt-manager"
 version = "0.1.0"
-source = "git+https://github.com/xcshuan/xudt-manager.git#9aec2752a4b7529eb64ec7ee4bb9dbbf0cd8610b"
 dependencies = [
  "anyhow",
  "ckb-hash",

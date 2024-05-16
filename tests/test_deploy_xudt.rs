@@ -200,6 +200,7 @@ fn test_xudt() {
                 .build(),
         output_datas[0].pack()
     );
+
     builder.add_output_and_data(
         CellOutput::new_builder()
             .lock(sender.clone())
