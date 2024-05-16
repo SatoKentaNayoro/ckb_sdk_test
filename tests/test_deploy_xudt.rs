@@ -223,7 +223,7 @@ fn test_xudt() {
     let outputs_validator = Some(ckb_jsonrpc_types::OutputsValidator::Passthrough);
 
     let tx_hash = ckb_client
-        .send_transaction(json_tx.inner, outputs_validator.clone())
+        .send_transaction(json_tx.inner, None)
         .expect("send transaction");
     println!(">>> tx {} sent! <<<", tx_hash);
 }
