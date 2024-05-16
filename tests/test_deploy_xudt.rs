@@ -25,7 +25,7 @@ impl RgbppTokenInfo {
         let lock_size = lock.as_bytes().len() + 33;
         let cell_data_size = self.encode_rgbpp_token_info().len();
         let unique_type_size = 32 + 1 + 20;
-        (lock_size + unique_type_size + 8 + cell_data_size) as u64
+        (lock_size + unique_type_size + 8 + cell_data_size) as u64 * 10000_0000
     }
 
     fn encode_rgbpp_token_info(&self) -> Bytes {
@@ -80,9 +80,10 @@ fn test_xudt() {
     println!("empty_cells: {:?}", empty_cells);
     assert!(!empty_cells.is_empty());
 
-    let xudt_capacity = sender.as_bytes().len() as u64;
+    let xudt_capacity = sender.occupied_capacity().unwrap().as_u64();
+    println!("xudt_capacity {xudt_capacity}");
     let xudt_info_capacity = xudt.calculate_xudt_token_info_cell_capacity(sender.clone());
-
+    println!("xudt_info_capacity {xudt_info_capacity}");
     let xudt_type = Script::new_builder()
         .code_hash(h256!("0x25c29dc317811a6f6f3985a7a9ebc4838bd388d19d0feeecf0bcd60f6c0975bb").pack())
         .hash_type(ScriptHashType::Type.into())
@@ -104,7 +105,7 @@ fn test_xudt() {
 
     let change_capacity = sum_inputs_capacity - xudt_capacity.clone() - xudt_info_capacity;
 
-    let outputs = [
+    let mut outputs = vec![
         CellOutput::new_builder()
             .lock(sender.clone())
             .type_(Some(xudt_type).pack())
@@ -124,7 +125,7 @@ fn test_xudt() {
     let total_amount = 2100_0000 * (10u128.pow(xudt.decimal as u32));
 
 
-    let mut outputs_data = vec![Bytes::default()];
+    let mut outputs_data = vec![];
     outputs_data.push(Bytes::from(total_amount.to_le_bytes().to_vec()));
     outputs_data.push(xudt.encode_rgbpp_token_info());
     outputs_data.push(Bytes::from("0x"));
@@ -171,6 +172,29 @@ fn test_xudt() {
         ).build();
 
 
+    let tx_before = TransactionBuilder::default()
+        .inputs(inputs.clone())
+        .outputs(outputs.clone())
+        .outputs_data(outputs_data.pack())
+        .cell_dep(secp256k1cell_dep.clone())
+        .cell_dep(unique_type_dep.clone())
+        .cell_dep(xudttype_dep.clone())
+        .witnesses(witnesses.pack())
+        .build();
+
+    let tx_size = tx_before.pack().as_bytes().len();
+    let change_capacity = change_capacity - (tx_size + 65) as u64;
+
+    println!("change_capacity {change_capacity}");
+
+    let _ = outputs.pop();
+    outputs.push(
+        CellOutput::new_builder()
+            .lock(sender.clone())
+            .capacity(change_capacity.pack())
+            .build()
+    );
+
     let tx = TransactionBuilder::default()
         .inputs(inputs)
         .outputs(outputs)
@@ -180,6 +204,7 @@ fn test_xudt() {
         .cell_dep(xudttype_dep)
         .witnesses(witnesses.pack())
         .build();
+
     let json_tx = ckb_jsonrpc_types::TransactionView::from(tx);
     println!("tx: {}", serde_json::to_string(&json_tx).unwrap());
     let outputs_validator = Some(ckb_jsonrpc_types::OutputsValidator::Passthrough);
