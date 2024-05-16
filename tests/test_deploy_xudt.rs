@@ -1,5 +1,4 @@
 use std::env;
-use std::io::Read;
 use std::str::FromStr;
 use ckb_hash::{blake2b_256, new_blake2b};
 use ckb_sdk::constants::SIGHASH_TYPE_HASH;
@@ -10,9 +9,9 @@ use ckb_sdk::transaction::input::TransactionInput;
 use ckb_sdk::transaction::signer::{SignContexts, TransactionSigner};
 use ckb_sdk::transaction::TransactionBuilderConfiguration;
 use ckb_types::bytes::Bytes;
-use ckb_types::core::{Capacity, DepType, FeeRate, ScriptHashType, TransactionBuilder};
-use ckb_types::{h256, packed};
-use ckb_types::packed::{Bytes as PackBytes, CellbaseWitnessBuilder, CellDep, CellInput, CellOutput, OutPoint, Script, Uint64};
+use ckb_types::core::{Capacity, DepType, ScriptHashType};
+use ckb_types::{h256, H256};
+use ckb_types::packed::{Bytes as PackBytes, CellDep, CellInput, CellOutput, OutPoint, Script, Uint64};
 use ckb_types::prelude::{Builder, Entity, Pack, Unpack};
 use dotenv::dotenv;
 use xudt_manager::XudtTransactionBuilder;
@@ -30,14 +29,17 @@ impl RgbppTokenInfo {
     fn encode_rgbpp_token_info(&self) -> Bytes {
         let name_hex = hex::encode(&self.name);
         let name = name_hex.as_bytes();
+        let name_size = name.len().to_le_bytes();
+
         let symbol_hex = hex::encode(&self.symbol);
         let symbol = symbol_hex.as_bytes();
+        let symbol_size = symbol.len().to_le_bytes();
 
         let mut bytes_vec = vec![];
         bytes_vec.push(self.decimal);
-        bytes_vec.extend_from_slice(&(name.len() as u32).to_le_bytes());
+        bytes_vec.extend_from_slice(name_size.as_ref());
         bytes_vec.extend_from_slice(name);
-        bytes_vec.extend_from_slice(&(symbol.len() as u32).to_le_bytes());
+        bytes_vec.extend_from_slice(symbol_size.as_ref());
         bytes_vec.extend_from_slice(symbol);
         Bytes::from(bytes_vec)
     }
@@ -50,16 +52,18 @@ fn test_xudt() {
 
     let xudt = RgbppTokenInfo {
         decimal: 8,
-        name: "Test CKB Bool Token".to_string(),
-        symbol: "TCBT".to_string(),
+        name: "XUDT Test B Token".to_string(),
+        symbol: "XTTB".to_string(),
     };
 
     let client = CkbRpcClient::new(network_info.url.as_str());
 
     let mut cell_collector = get_cell_collector(&network_info.url);
 
-    let sender_key = secp256k1::SecretKey::from_str(env::var("SenderKey").unwrap().as_str()).unwrap();
+    let sender_private_key = H256::from_str( env::var("SenderKey").unwrap().as_str()).unwrap();
     let sender = {
+        let sender_key = secp256k1::SecretKey::from_slice(sender_private_key.as_bytes())
+            .map_err(|err| format!("invalid sender secret key: {}", err)).unwrap();
         let pubkey = secp256k1::PublicKey::from_secret_key(&SECP256K1, &sender_key);
         let hash160 = blake2b_256(&pubkey.serialize()[..])[0..20].to_vec();
         Script::new_builder()
@@ -112,42 +116,11 @@ fn test_xudt() {
     ];
 
     let output0_capacity = sender_lock_capacity + xudt_type_capacity + Capacity::bytes(8).unwrap().as_u64() + Capacity::bytes(output_datas[0].len()).unwrap().as_u64();
-    let output1_capacity = sender_lock_capacity + unique_type_capacity + xudt_info_capacity + Capacity::bytes(8).unwrap().as_u64() + Capacity::bytes(output_datas[1].len()).unwrap().as_u64();
+    let output1_capacity = sender_lock_capacity + unique_type_capacity + Capacity::bytes(8).unwrap().as_u64() + Capacity::bytes(output_datas[1].len()).unwrap().as_u64();
     println!("out0 capacity {}", output0_capacity);
     println!("out1 capacity {}", output1_capacity);
 
-
-    let (inputs, sum_inputs_capacity) = collect_inputs(
-        ckb_cells.clone(),
-        output0_capacity + output1_capacity,
-        2000_0000,
-    );
-
-    let change_capacity = sum_inputs_capacity - output0_capacity - output1_capacity;
-
-    // let mut outputs = vec![
-    //     CellOutput::new_builder()
-    //         .lock(sender.clone())
-    //         .type_(Some(xudt_type).pack())
-    //         .capacity(output0_capacity.pack())
-    //         .build(),
-    //     CellOutput::new_builder()
-    //         .lock(sender.clone())
-    //         .capacity(change_capacity.pack())
-    //         .build()
-    // ];
-
-    let base_witness = CellbaseWitnessBuilder::default().build();
-
-    let witnesses = inputs.iter().enumerate().map(|(index, _)| {
-        if index == 0 {
-            base_witness.as_bytes()
-        } else {
-            Bytes::from("0x")
-        }
-    }).collect::<Vec<_>>();
-
-    let secp256k1cell_dep = CellDep::new_builder()
+    let secp256k1_dep = CellDep::new_builder()
         .out_point(OutPoint::new_builder()
             .tx_hash(
                 h256!("0xf8de3bb47d055cdf460d93a2a6e1b05f7432f9777c8c474abf4eec1d4aee5d37")
@@ -169,7 +142,7 @@ fn test_xudt() {
             .build()
         ).build();
 
-    let xudttype_dep = CellDep::new_builder()
+    let xudt_type_dep = CellDep::new_builder()
         .out_point(OutPoint::new_builder()
             .tx_hash(
                 h256!("0xbf6fb538763efec2a70a6a3dcb7242787087e1030c4e7d86585bc63a9d337f5f")
@@ -217,23 +190,22 @@ fn test_xudt() {
     builder.add_output_and_data(
         CellOutput::new_builder()
             .lock(sender.clone())
-            .capacity(change_capacity.pack())
+            // .capacity(change_capacity.pack())
             .build(),
         PackBytes::default()
     );
-
-    builder.add_cell_deps(vec![secp256k1cell_dep]);
-    builder.add_cell_deps(vec![unique_type_dep]);
+    builder.add_cell_dep(secp256k1_dep);
+    builder.add_cell_dep(unique_type_dep);
+    builder.add_cell_dep(xudt_type_dep);
 
 
     let mut tx_with_groups = builder.build(&Default::default()).unwrap();
     let json_tx = ckb_jsonrpc_types::TransactionView::from(tx_with_groups.get_tx_view().clone());
     println!("tx: {}", serde_json::to_string_pretty(&json_tx).unwrap());
-
-    let private_keys = vec![sender_key];
+    let private_keys = vec![sender_private_key];
     TransactionSigner::new(&network_info).sign_transaction(
         &mut tx_with_groups,
-        &SignContexts::new_sighash(private_keys),
+        &SignContexts::new_sighash_h256(private_keys).unwrap(),
     ).unwrap();
 
     let json_tx = ckb_jsonrpc_types::TransactionView::from(tx_with_groups.get_tx_view().clone());
@@ -246,6 +218,7 @@ fn test_xudt() {
     println!(">>> tx {} sent! <<<", tx_hash);
 }
 
+#[allow(dead_code)]
 fn collect_inputs(
     live_cells: Vec<LiveCell>,
     need_capacity: u64,
