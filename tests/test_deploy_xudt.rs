@@ -27,22 +27,22 @@ struct RgbppTokenInfo {
 }
 
 impl RgbppTokenInfo {
-    fn encode_rgbpp_token_info(&self) -> Bytes {
+    fn encode_rgbpp_token_info(&self) -> String {
+        let decimal = hex::encode(&vec![self.decimal]);
+        println!("decimal {}", decimal);
         let name_hex = hex::encode(&self.name);
-        let name = name_hex.as_bytes();
-        let name_size = name.len().to_le_bytes();
-
+        println!("name_hex {}", name_hex);
+        let name_size =  hex::encode(&vec![(name_hex.len()/2) as u8]);
+        println!("name_size {}", name_size);
         let symbol_hex = hex::encode(&self.symbol);
-        let symbol = symbol_hex.as_bytes();
-        let symbol_size = symbol.len().to_le_bytes();
+        println!("symbol_hex {}", symbol_hex);
+        let symbol_size = hex::encode(&vec![(symbol_hex.len()/2) as u8]);
+        println!("symbol_size {}", symbol_size);
+        let hex = format!("{}{}{}{}{}", decimal,name_size, name_hex,symbol_size, symbol_hex);
+        println!("hex {}", hex);
+        println!("hex len {}", hex.len());
 
-        let mut bytes_vec = vec![];
-        bytes_vec.push(self.decimal);
-        bytes_vec.extend_from_slice(name_size.as_ref());
-        bytes_vec.extend_from_slice(name);
-        bytes_vec.extend_from_slice(symbol_size.as_ref());
-        bytes_vec.extend_from_slice(symbol);
-        Bytes::from(bytes_vec)
+        hex
     }
 }
 
@@ -109,10 +109,13 @@ fn test_xudt() {
     let unique_type_capacity = unique_type_script.occupied_capacity().unwrap().as_u64();
     println!("unique_type_capacity {xudt_info_capacity}");
 
+    // println!("{}", xudt.encode_rgbpp_token_info().len());
+    // println!("{}", xudt.encode().as_bytes().len());
+
     let total_amount = 2100_0000 * (10u128.pow(xudt.decimal as u32));
     let output_datas = vec![
         Bytes::from(total_amount.to_le_bytes().to_vec()),
-        xudt.encode_rgbpp_token_info(),
+        xudt.encode_rgbpp_token_info().into(),
         Bytes::default()
     ];
 
@@ -253,12 +256,15 @@ fn collect_inputs(
 
 fn generate_unique_type_args(first_input: CellInput, first_output_index: u64) -> PackBytes {
     let input = first_input.as_bytes();
+    println!("input {:?}", input.as_ref());
     let mut hasher = new_blake2b();
     hasher.update(input.as_ref());
     hasher.update(first_output_index.to_le_bytes().as_ref());
+    println!("first_output_index {:?}", first_output_index.to_le_bytes().as_ref());
     let mut args =  [0u8; 40];
     hasher.finalize(&mut args);
-    args.pack()
+    println!("args {:?}", &args[0..20]);
+    args[0..20].pack()
 }
 
 fn calculate_udt_cell_capacity(lock: Script) -> usize {
@@ -269,8 +275,10 @@ fn calculate_udt_cell_capacity(lock: Script) -> usize {
 }
 
 fn calculate_xudt_token_info_cell_capacity(token_info: RgbppTokenInfo, lock:  Script) -> usize {
-    let lock_size = lock.args().len();
-    let cell_data_size = token_info.encode_rgbpp_token_info().len();
+    let lock_size = lock.args().len() + 33;
+    println!("lock_size {}", lock_size);
+    let cell_data_size = token_info.encode_rgbpp_token_info().len()/2;
+    println!("cell_data_size {}", cell_data_size);
     let unique_type_size = 32 + 1 + 20;
     lock_size + unique_type_size + 8 + cell_data_size
 }
